@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Image Transformation: Eigenvectors & Polar Decomposition</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--mut:#6b6b66;--card:#fff;--bd:#ddddd5;--ac:#2a5bd7;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--fg:#ececE6;--mut:#9a9a92;--card:#212120;--bd:#34342f;--ac:#7ba3ff}}
+:root[data-theme="dark"]{--bg:#171716;--fg:#ececE6;--mut:#9a9a92;--card:#212120;--bd:#34342f;--ac:#7ba3ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;max-width:900px;margin-inline:auto}
+h1{font-size:20px;margin:4px 0 4px}p.s{color:var(--mut);margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.mat{display:grid;grid-template-columns:repeat(2,72px);gap:6px;margin:8px 0}
+input{width:72px;padding:8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+button{padding:7px 12px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit;cursor:pointer;margin:2px 4px 2px 0}
+button:hover{border-color:var(--ac)}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.pn{flex:1 1 220px;text-align:center}.pn b{display:block;font-size:13px;margin-bottom:4px}
+canvas{width:100%;max-width:260px;height:auto;border:1px solid var(--bd);border-radius:8px;background:#fff}
+pre{margin:0;overflow-x:auto;font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre}
+.w{color:#c0392b}
+</style>
+</head>
+<body>
+<h1>Matrix → Image Transformation</h1>
+<p class="s">Edit the 2×2 matrix A. See its eigenvectors and its polar decomposition A = R·S (rotation × stretch) applied to an image.</p>
+
+<div class="card">
+<b>Matrix A</b>
+<div class="mat">
+<input id="a" type="number" step="0.1" value="2"><input id="b" type="number" step="0.1" value="1">
+<input id="c" type="number" step="0.1" value="0.5"><input id="d" type="number" step="0.1" value="1.5">
+</div>
+<button data-p="2,1,0.5,1.5">Default</button>
+<button data-p="1,0.8,0,1">Shear</button>
+<button data-p="0.87,-0.5,0.5,0.87">Rotation</button>
+<button data-p="2,0,0,0.6">Stretch</button>
+<button data-p="1,2,2,1">Symmetric</button>
+</div>
+
+<div class="card row">
+<div class="pn"><b>1. Original + eigenvectors</b><canvas id="c0" width="250" height="250"></canvas></div>
+<div class="pn"><b>2. Stretch only (S)</b><canvas id="c1" width="250" height="250"></canvas></div>
+<div class="pn"><b>3. Full A = R·S</b><canvas id="c2" width="250" height="250"></canvas></div>
+</div>
+
+<div class="card"><pre id="out"></pre></div>
+
+<script>
+const N=250,$=id=>document.getElementById(id);
+// test image
+const src=document.createElement('canvas');src.width=src.height=N;
+(function(){const g=src.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,N,N);
+g.strokeStyle='#dcdcdc';g.lineWidth=1;for(let i=0;i<N;i+=N/5){g.beginPath();g.moveTo(i,0);g.lineTo(i,N);g.moveTo(0,i);g.lineTo(N,i);g.stroke()}
+g.strokeStyle='#000';g.lineWidth=3;g.strokeRect(1.5,1.5,N-3,N-3);
+const m=N/4;g.lineWidth=4;g.strokeStyle='#1f77b4';g.strokeRect(m,m,N-2*m,N-2*m);
+g.strokeStyle='#d62728';g.beginPath();g.ellipse(N/2,N/2,N/2-m-10,N/2-m-10,0,0,7);g.stroke();
+g.lineWidth=3;g.strokeStyle='#2ca02c';g.beginPath();g.moveTo(N/2,m);g.lineTo(N/2,N-m);g.stroke();
+g.strokeStyle='#ff7f0e';g.beginPath();g.moveTo(m,N/2);g.lineTo(N-m,N/2);g.stroke()})();
+const srcData=src.getContext('2d').getImageData(0,0,N,N);
+
+const mul=(X,Y)=>[X[0]*Y[0]+X[1]*Y[2],X[0]*Y[1]+X[1]*Y[3],X[2]*Y[0]+X[3]*Y[2],X[2]*Y[1]+X[3]*Y[3]];
+const T=X=>[X[0],X[2],X[1],X[3]];
+const det=X=>X[0]*X[3]-X[1]*X[2];
+const inv=X=>{const D=det(X);return[X[3]/D,-X[1]/D,-X[2]/D,X[0]/D]};
+const f=(x,n=4)=>(Math.abs(x)<5e-10?0:x).toFixed(n);
+const fm=X=>`[${f(X[0]).padStart(9)} ${f(X[1]).padStart(9)}]\n[${f(X[2]).padStart(9)} ${f(X[3]).padStart(9)}]`;
+
+function eig(A){const[a,b,c,d]=A,tr=a+d,dt=det(A),disc=tr*tr/4-dt;
+ if(disc<-1e-12)return null;
+ const s=Math.sqrt(Math.max(disc,0)),l=[tr/2+s,tr/2-s];
+ const nv=v=>{const n=Math.hypot(v[0],v[1]);return[v[0]/n,v[1]/n]};
+ const vec=L=>{if(Math.abs(c)>1e-12)return nv([L-d,c]);if(Math.abs(b)>1e-12)return nv([b,L-a]);return Math.abs(L-a)<=Math.abs(L-d)?[1,0]:[0,1]};
+ let v=[vec(l[0]),vec(l[1])];
+ if(Math.abs(b)<1e-12&&Math.abs(c)<1e-12&&Math.abs(a-d)<1e-12)v=[[1,0],[0,1]];
+ return{l,v}}
+
+function polar(A){const M=mul(T(A),A),p=M[0],q=M[1],r=M[3];
+ const phi=0.5*Math.atan2(2*q,p-r),cs=Math.cos(phi),sn=Math.sin(phi);
+ const m=(p+r)/2,dd=Math.hypot((p-r)/2,q),l1=m+dd,l2=Math.max(m-dd,0);
+ const s1=Math.sqrt(l1),s2=Math.sqrt(l2);
+ const V=[cs,-sn,sn,cs];
+ const S=mul(mul(V,[s1,0,0,s2]),T(V));
+ const R=mul(A,inv(S));return{R,S}}
+
+function warp(ctx,M){const Mi=inv(M),o=ctx.createImageData(N,N),s=srcData.data,h=N/2;
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+  const X=x-h,Y=y-h;
+  let sx=Math.round(Mi[0]*X+Mi[1]*Y+h),sy=Math.round(Mi[2]*X+Mi[3]*Y+h);
+  sx=sx<0?0:sx>N-1?N-1:sx;sy=sy<0?0:sy>N-1?N-1:sy;
+  const i=(y*N+x)*4,j=(sy*N+sx)*4;
+  o.data[i]=s[j];o.data[i+1]=s[j+1];o.data[i+2]=s[j+2];o.data[i+3]=255}
+ ctx.putImageData(o,0,0)}
+
+function arrow(g,dx,dy,col,w=3){const h=N/2,ex=h+dx,ey=h+dy,a=Math.atan2(dy,dx);
+ g.strokeStyle=g.fillStyle=col;g.lineWidth=w;g.beginPath();g.moveTo(h,h);g.lineTo(ex,ey);g.stroke();
+ g.beginPath();g.moveTo(ex,ey);g.lineTo(ex-10*Math.cos(a-.4),ey-10*Math.sin(a-.4));g.lineTo(ex-10*Math.cos(a+.4),ey-10*Math.sin(a+.4));g.fill()}
+
+function run(){
+ const A=['a','b','c','d'].map(k=>parseFloat($(k).value)||0);
+ const g=[0,1,2].map(i=>$('c'+i).getContext('2d'));
+ const out=$('out');
+ if(Math.abs(det(A))<1e-9){g.forEach(x=>{x.clearRect(0,0,N,N);x.drawImage(src,0,0)});
+  out.innerHTML='<span class="w">A is singular (det = 0). Choose a non-singular matrix.</span>';return}
+ const{R,S}=polar(A),E=eig(A),ang=Math.atan2(R[2],R[0])*180/Math.PI;
+ g[0].drawImage(src,0,0);warp(g[1],S);warp(g[2],A);
+ const col=['#d62728','#9467bd'],sc=60;
+ let t=`det(A) = ${f(det(A))}\n\n[1] Matrix A\n${fm(A)}\n\n[2] Eigen-analysis\n`;
+ if(E){for(let i=0;i<2;i++){const v=E.v[i],l=E.l[i];
+   arrow(g[0],v[0]*sc,v[1]*sc,col[i]);
+   const Av=[A[0]*v[0]+A[1]*v[1],A[2]*v[0]+A[3]*v[1]];
+   arrow(g[2],Av[0]*sc/Math.max(Math.abs(l),1e-6)*Math.sign(l||1),Av[1]*sc/Math.max(Math.abs(l),1e-6)*Math.sign(l||1),col[i]);
+   t+=`  λ${i+1} = ${f(l)}   v${i+1} = [${f(v[0])}, ${f(v[1])}]\n  A·v${i+1} = [${f(Av[0])}, ${f(Av[1])}] = λ${i+1}·v${i+1}  → pure scaling, no rotation\n`}}
+ else t+='  Complex eigenvalues: no real eigenvector exists, so every direction is rotated.\n';
+ t+=`\n[3] Polar decomposition  A = R·S\n  R (${det(R)>0?'rotation':'reflection'}, angle ${f(ang,2)}°)\n${fm(R).replace(/^/gm,'  ')}\n  S (pure stretch)\n${fm(S).replace(/^/gm,'  ')}\n`;
+ out.textContent=t}
+
+document.querySelectorAll('input').forEach(i=>i.addEventListener('input',run));
+document.querySelectorAll('button[data-p]').forEach(b=>b.addEventListener('click',()=>{
+ b.dataset.p.split(',').forEach((v,i)=>$('abcd'[i]).value=v);run()}));
+run();
+</script>
+</body>
+</html>
